@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Установка Bitrix REST Test</title>
+  <script src="https://api.bitrix24.com/api/v1/"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; line-height: 1.4; }
+    button { padding: 8px 12px; }
+  </style>
+</head>
+<body>
+  <p id="status">Инициализация...</p>
+  <button id="finish" disabled>Завершить установку</button>
+
+  <script>
+    const statusEl = document.getElementById('status');
+    const finishBtn = document.getElementById('finish');
+
+    if (typeof BX24 === 'undefined') {
+      statusEl.textContent = 'BX24.js не загрузился.';
+    } else {
+      BX24.init(function () {
+        statusEl.textContent = 'Приложение готово к установке.';
+        finishBtn.disabled = false;
+      });
+
+      finishBtn.addEventListener('click', function () {
+        statusEl.textContent = 'Завершаем установку...';
+        BX24.installFinish();
+      });
+    }
+  </script>
+</body>
+</html>
