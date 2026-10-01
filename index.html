@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Bitrix REST Task Diagnostic</title>
+  <script src="https://api.bitrix24.com/api/v1/"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; line-height: 1.45; max-width: 1000px; }
+    h1 { font-size: 22px; margin-bottom: 8px; }
+    h2 { font-size: 17px; margin-top: 26px; }
+    button { margin: 4px 6px 4px 0; padding: 8px 12px; cursor: pointer; }
+    input { padding: 8px; width: 220px; }
+    pre { background: #f5f5f5; padding: 12px; white-space: pre-wrap; word-break: break-word; border-radius: 6px; }
+    .note { max-width: 900px; }
+    .warn { background: #fff7e6; padding: 10px 12px; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <h1>Диагностика REST-доступа к задачам Bitrix24</h1>
+
+  <p class="note">
+    Страница не отправляет результаты на GitHub или иные внешние сервисы.
+    REST-вызовы выполняются внутри iframe Bitrix24 через BX24.js.
+  </p>
+
+  <p class="warn">
+    Для проверки истории используйте тестовую задачу без персональных данных.
+  </p>
+
+  <button id="runBasic" disabled>Проверить scope / methods / task</button>
+
+  <h2>Базовая проверка</h2>
+  <pre id="basic">Инициализация BX24...</pre>
+
+  <h2>История конкретной тестовой задачи</h2>
+  <input id="taskId" inputmode="numeric" placeholder="ID тестовой задачи">
+  <button id="runHistory" disabled>Проверить task.logitem.list</button>
+  <pre id="history">Введите ID тестовой задачи после успешной базовой проверки.</pre>
+
+<script>
+(function () {
+  const basicEl = document.getElementById('basic');
+  const historyEl = document.getElementById('history');
+  const runBasicBtn = document.getElementById('runBasic');
+  const runHistoryBtn = document.getElementById('runHistory');
+
+  function normalizeError(result) {
+    try {
+      const e = result.error();
+      if (!e) return null;
+      return {
+        error: e.ex && e.ex.error ? e.ex.error : (e.error || String(e)),
+        error_description: e.ex && e.ex.error_description
+          ? e.ex.error_description
+          : (e.error_description || '')
+      };
+    } catch (err) {
+      return { error: String(err) };
+    }
+  }
+
+  function call(method, params) {
+    return new Promise((resolve) => {
+      BX24.callMethod(method, params || {}, function (result) {
+        if (result.error()) {
+          resolve({ ok: false, method, error: normalizeError(result) });
+          return;
+        }
+        resolve({ ok: true, method, data: result.data() });
+      });
+    });
+  }
+
+  async function runBasic() {
+    basicEl.textContent = 'Проверяем...';
+
+    const scope = await call('scope', {});
+    const methods = await call('methods', {});
+    const taskManifest = await call('task.item.getmanifest', {});
+
+    let taskMethods = [];
+    if (methods.ok && Array.isArray(methods.data)) {
+      taskMethods = methods.data.filter(x =>
+        String(x).toLowerCase().startsWith('task')
+      );
+    }
+
+    const report = {
+      scope,
+      methods_summary: methods.ok ? {
+        total_methods: Array.isArray(methods.data) ? methods.data.length : null,
+        task_methods_count: taskMethods.length,
+        task_methods: taskMethods
+      } : methods,
+      task_item_getmanifest: taskManifest
+    };
+
+    basicEl.textContent = JSON.stringify(report, null, 2);
+  }
+
+  async function runHistory() {
+    const raw = document.getElementById('taskId').value.trim();
+    if (!/^\d+$/.test(raw)) {
+      historyEl.textContent = 'Введите числовой ID тестовой задачи.';
+      return;
+    }
+
+    const taskId = Number(raw);
+    historyEl.textContent = 'Запрашиваем историю...';
+
+    // Для старого BX24.js legacy-метод наиболее совместимо вызывать позиционным параметром.
+    const res = await call('task.logitem.list', [taskId]);
+
+    if (!res.ok) {
+      historyEl.textContent = JSON.stringify(res, null, 2);
+      return;
+    }
+
+    const rows = Array.isArray(res.data) ? res.data : [];
+    const fieldCounts = {};
+
+    for (const row of rows) {
+      const field = row && row.FIELD ? String(row.FIELD) : '(empty)';
+      fieldCounts[field] = (fieldCounts[field] || 0) + 1;
+    }
+
+    // Не выводим COMMENT, описание и прочие значения.
+    // Показываем только технические события изменения стадии.
+    const stageEvents = rows
+      .filter(row => row && String(row.FIELD).toUpperCase() === 'STAGE_ID')
+      .map(row => ({
+        CREATED_DATE: row.CREATED_DATE || null,
+        TASK_ID: row.TASK_ID || String(taskId),
+        USER_ID: row.USER_ID || null,
+        FIELD: row.FIELD || null,
+        FROM_VALUE: row.FROM_VALUE || null,
+        TO_VALUE: row.TO_VALUE || null
+      }));
+
+    const report = {
+      ok: true,
+      taskId,
+      total_log_rows: rows.length,
+      fields_found: fieldCounts,
+      stage_id_events: stageEvents
+    };
+
+    historyEl.textContent = JSON.stringify(report, null, 2);
+  }
+
+  runBasicBtn.addEventListener('click', runBasic);
+  runHistoryBtn.addEventListener('click', runHistory);
+
+  if (typeof BX24 === 'undefined') {
+    basicEl.textContent =
+      'BX24.js не загрузился. Проверьте, что страница открыта именно как локальное приложение внутри Bitrix24.';
+    return;
+  }
+
+  BX24.init(function () {
+    runBasicBtn.disabled = false;
+    runHistoryBtn.disabled = false;
+    basicEl.textContent =
+      'BX24 инициализирован. Нажмите «Проверить scope / methods / task».';
+  });
+})();
+</script>
+</body>
+</html>
