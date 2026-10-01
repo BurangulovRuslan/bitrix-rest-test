@@ -23,3 +23,5 @@
 - Initial installation: `https://burangulovruslan.github.io/bitrix-rest-test/install.html`
 
 В правах локального приложения выбрать `Задачи (task)`.
+
+<!-- pages-rebuild: 2026-10-01 -->
